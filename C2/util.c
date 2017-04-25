@@ -39,20 +39,20 @@ GraphList * getNextSize(Graph * g){
 
 bool hasK3(Graph * g, Color c){
   int n = g->n;
-  bool * hasEnoughEdges = hasNMinusOneEdges(g, c, 3);
+  int * numEdges = getCharList(g, c);
 
   for(int i = 0; i < n - 2; i++){
-    if( *(hasEnoughEdges+i) == TRUE) {
+    if( *(numEdges+i) >= 2) {
       for(int j = i + 1; j < n - 1; j++){
-        if( *(hasEnoughEdges+j) == TRUE) {
+        if( *(numEdges+j) >= 2) {
           for(int k = j + 1; k < n; k++){
             if(
-              *(hasEnoughEdges+k) == TRUE  &&
+              *(numEdges+k) >= 2  &&
               getEdgeColor(g, i, j) == c &&
               getEdgeColor(g, j, k) == c &&
               getEdgeColor(g, i, k) == c
             ){
-              free(hasEnoughEdges);
+              free(numEdges);
               return TRUE;
             }
           }
@@ -60,23 +60,23 @@ bool hasK3(Graph * g, Color c){
       }
     }
   }
-  free(hasEnoughEdges);
+  free(numEdges);
   return FALSE;
 }
 
 bool hasK4(Graph * g, Color c){
   int n = g->n;
-  bool * hasEnoughEdges = hasNMinusOneEdges(g, c, 4);
+  int * numEdges = getCharList(g, c);
 
   for(int h = 0; h < n - 3; h++) {
-    if( *(hasEnoughEdges+h) == TRUE) {
+    if( *(numEdges+h) >= 3) {
       for(int i = h + 1; i < n - 2; i++){
-        if( *(hasEnoughEdges+i) == TRUE) {
+        if( *(numEdges+i) >= 3) {
           for(int j = i + 1; j < n - 1; j++){
-            if( *(hasEnoughEdges+j) == TRUE) {
+            if( *(numEdges+j) >= 3) {
               for(int k = j + 1; k < n; k++){
                 if(
-                  *(hasEnoughEdges+k) == TRUE  &&
+                  *(numEdges+k) >= 3  &&
                   getEdgeColor(g, h, i) == c &&
                   getEdgeColor(g, h, j) == c &&
                   getEdgeColor(g, h, k) == c &&
@@ -84,7 +84,7 @@ bool hasK4(Graph * g, Color c){
                   getEdgeColor(g, i, k) == c &&
                   getEdgeColor(g, j, k) == c
                 ){
-                  free(hasEnoughEdges);
+                  free(numEdges);
                   return TRUE;
                 }
               }
@@ -94,7 +94,7 @@ bool hasK4(Graph * g, Color c){
       }
     }
   }
-  free(hasEnoughEdges);
+  free(numEdges);
   return FALSE;
 }
 
@@ -199,10 +199,10 @@ int cmpfunc (const void * a, const void * b)
 */
 bool isColorIso(Graph * g, Graph * h){
   //printf("starting the isomorphism checking process\n");
-  int * charListG = getCharList(g);
-  int * charListGSorted = getCharList(g);
-  int * charListH = getCharList(h);
-  int * charListHSorted = getCharList(h);
+  int * charListG = getCharList(g, RED);
+  int * charListGSorted = getCharList(g, RED);
+  int * charListH = getCharList(h, RED);
+  int * charListHSorted = getCharList(h, RED);
   int n = g->n;
   qsort(charListGSorted,n,sizeof(int),cmpfunc);
   qsort(charListHSorted,n,sizeof(int),cmpfunc);
@@ -213,38 +213,43 @@ bool isColorIso(Graph * g, Graph * h){
   free(charListHSorted);
 
   if(result == 0){
+      //printf("--------------------\n");
+
       for(int i = 0; i < n; i++){
         vertsG[i] = calloc(1, sizeof *vertsG[i]);
         vertsH[i] = calloc(1, sizeof *vertsH[i]);
       }
       for(int i = 0 ; i < n; i++){
-        addToList(vertsG[charListG[i]], i);
-        addToList(vertsH[charListH[i]], i);
-      }
-
-      for(int i = 0; i < n; i++){
-        if (vertsG[i]->next != NULL) {
-          Cell * toFree = vertsG[i];
-          vertsG[i] = vertsG[i]->next;
+         addToList(vertsG[charListG[i]], i);
+         addToList(vertsH[charListH[i]], i);
+       }
+       for(int i = 0; i < n; i++){
+         if (vertsG[i]->next != NULL) {
+         Cell * toFree = vertsG[i];
+           vertsG[i] = vertsG[i]->next;
           free(toFree);
-        }
-        if (vertsH[i]->next != NULL) {
+           //printf("G: ");
+           //printList(vertsG[i]);
+         }
+         if (vertsH[i]->next != NULL) {
           Cell * toFree = vertsH[i];
-          vertsH[i] = vertsH[i]->next;
+           vertsH[i] = vertsH[i]->next;
           free(toFree);
-        }
+           //printf("                   H: ");
+           //printList(vertsH[i]);
+         }
       }
 
       bool ans = recIsoCheck(vertsG, vertsH, 0, g, h);
 
       for(int i = 0; i < n; i++){
-        freeList(vertsG[i]);
-        freeList(vertsH[i]);
-      }
+         freeList(vertsG[i]);
+         freeList(vertsH[i]);
+       }
 
-      free(charListH);
-      free(charListG);
-      return ans;
+       free(charListH);
+       free(charListG);
+       return ans;
   }else{
     free(charListH);
     free(charListG);
@@ -260,56 +265,94 @@ bool isColorIso(Graph * g, Graph * h){
   Currently broken.usage
 */
 void clean(GraphList * gL){
-  int numGraphs = gL->size;
-  int i = 0;
-  int foundGraphs = 0;
+    //printf("starting off with %d graphs\n", gL->size);
+    //printf("%d\n", getGraph(gL, 0)->isNull);
 
-  GraphList * cleanedGraphs = newGraphList(numGraphs);
+   //if(gL->size > 1000) printf("started cleaning...\n");
+    int numGraphs = gL->size;
+    int i = 0;
+    int foundGraphs = 0;
+    //printf("doing it in clean\n");
+    GraphList * cleanedGraphs = newGraphList(numGraphs);
+   printf("about to start checking isos                   ");
+  dumpMallinfo();
+   //printf("about to start checking isos                   ");
+   //dumpMallinfo();
+    while(i < numGraphs){
+      //printf("-----------------------------------------------\n");
+      Graph * current = getGraph(gL, i);
+   //  printf("got graph %d out of %lu\n", i, numGraphs);
+     if(!current->isNull){
+       //printGraph(*(*gL->graphs + i));
+        //**(*cleanedGraphs->graphs + foundGraphs) = **(*gL->graphs + i);
+        //foundGraphs++;
+        //printf("comparing to others...\n");
 
-  while(i < numGraphs){
-    Graph * current = getGraph(gL, i);
-    if(!current->isNull){
-      for(int j = numGraphs - 1; j > i; j--){
-        Graph * other = getGraph(gL, j);
-        if(!other->isNull){
-          if(isColorIso(current, other)){
-            other->isNull = TRUE;
+        for(int j = numGraphs - 1; j > i; j--){
+          //printf("comparing to %d\n", j);
+          Graph * other = getGraph(gL, j);
+         //printf("got other\n");
+         if(!other->isNull){
+           //printf("before isColorIso: ");
+           //dumpMallinfo();
+           if(isColorIso(current, other)){
+             //printf("Were color iso %d %d\n", i, j);
+              other->isNull = TRUE;
+            }
+            //printf("after isColorIso: ");
+          //dumpMallinfo();
+        //  dumpMallinfo();
+
           }
         }
+
+     }
+     if(gL->size > 1000 && i%100 == 0){
+       printf("%3d%% done...", (int)(i*100/gL->size));
+       printf("\n\033[F\033[J");
       }
+      i++;
     }
-    if(gL->size > 1000 && i%100 == 0){
-      printf("%3d%% done...", (int)(i*100/gL->size));
-      printf("\n\033[F\033[J");
-    }
-    i++;
-  }
-  i=0;
+   printf("Done checking color isomorphism in clean      ");
+   dumpMallinfo();
+   //if(gL->size > 1000) printf("done checking color isomorphisms\n");
+   //printf("Done checking color isomorphism in clean      ");
+   //dumpMallinfo();
+    i=0;
 
-  while(i < numGraphs){
-    Graph * current = getGraph(gL, i);
-    if(!current->isNull){
-      bool K3 = hasK4(current, RED);
-      bool K4 = hasK4(current, GREEN);
-      if(K3 | K4){
-        current->isNull = TRUE;
-      }else{
-        *(*cleanedGraphs->graphs + foundGraphs) = *(*gL->graphs + i);
-        foundGraphs++;
+    while(i < numGraphs){
+     Graph * current = getGraph(gL, i);
+     if(!current->isNull){
+       //printGraph(*(*gL->graphs + i));
+       bool K3 = hasK3(current, RED);
+       bool K4 = hasK4(current, GREEN);
+       if(K3 | K4){
+         current->isNull = TRUE;
+         //printf("Woops, had red K3 or green K4\n");
+       }else{
+         //printf("Found a good one! %d\n", i);
+         *(*cleanedGraphs->graphs + foundGraphs) = *(*gL->graphs + i);
+         foundGraphs++;
+       }
+        //printf("Found another one\n");
       }
+      i++;
+
     }
-    i++;
-  }
+    //printf("done cheking for complete subgraphs\n");
+    for(i = 0; i < foundGraphs; i++){
+     //printf("Set %d to a found graph\n", i);
+     *(*gL->graphs + i) = *(*cleanedGraphs->graphs + i);
+   }
+    //printf("done reassigning graph pointers\n");
+    shrinkGraphList(gL, foundGraphs);
+    destroyGraphList(cleanedGraphs);
 
-  for(i = 0; i < foundGraphs; i++){
+   //if(gL->size > 1000) printf("done checking for Kns\n");
+    //printf("shrunk gL\n");
 
-    *(*gL->graphs + i) = *(*cleanedGraphs->graphs + i);
-  }
-
-  shrinkGraphList(gL, foundGraphs);
-  destroyGraphList(cleanedGraphs);
-
-}
+    //printf("destroyed cleanedGraphs\n");
+ }
 
 
 
@@ -352,7 +395,9 @@ int run(){
       clean(gL);
       //printf("cleaned\n");
       mergeGraphLists(*(graphTiers + i), gL);
+
       //if((*(graphTiers + i))->size > 1000 && j%10 == 0) clean(*(graphTiers + i));
+
       //printf("Done merging in %d\n", j);
       //clean(*(graphTiers + i));
       //printf("%d\n", gL->size);

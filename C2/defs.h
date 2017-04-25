@@ -71,7 +71,7 @@ Cell ** copyListArray(Cell *array[], int n);
 Cell * permuteList(Cell * list, Cell * perm);
 
 //graph.c
-int * getCharList(Graph * g);
+int * getCharList(Graph * g, Color c);
 void printGraph(Graph * g);
 void printGraphL(Graph * g);
 Graph * createKn(int numVertices);
