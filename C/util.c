@@ -1,405 +1,431 @@
-#include <stdio.h>    //printf and other io
-#include <stdlib.h>   //malloc and stuff
-#include <string.h>   //sprintf
-#include <math.h>     //various mathy things
-#include <time.h>     //to initialize rand
-#include "defs.h"     //our custom header file
+#include "defs.h"
 
 
-/*  Accepts a color, and returns a string literal with the corresponding
- * color as text
- */
-char* colorToString(Color col){
-  switch(col){
-    case RED:
-      return("red");
-      break;
-    case GREEN:
-      return("green");
-      break;
-  }
+int memUsage = 0;
+int memFreed = 0;
+bool debug = FALSE;
+
+/*
+  Used to monitor memory usage. Dividing by 1000 instead of 1024
+  just to be able to read bytes at a glance.
+*/
+void dumpMallinfo(){
+  struct mallinfo m = mallinfo();
+  printf("used kbytes = %.3f\n", m.uordblks/1000.0);
 }
 
-/*  Accepts a buffer and an edge pointer
- * Sets the buffer to a human readable representation of the edgeToString
- *
- * Consider rewriting with malloc to return just the string pointer
- */
-void edgeToString(char* s, Edge * e){
-  sprintf(s, "(%d, %d), %s", e->v1->id, e->v2->id, colorToString(e->col));
+/*
+  Ugly malloc wrapper used to debug memory leaks. Will be removed next version.
+*/
+void * mallocDB(int bytes, char* id){
+  memUsage += bytes;
+  if (debug) printf("Trying to allocate %.3f KB of memory at call %s\n", bytes/1000.0, id);
+  return calloc(bytes, sizeof(char));
 }
 
-/*  Initializes a vertex pointer
- *  vin is the vertex pointer
- *  id is the desired new id
- *  n is the number of neighbors expected for this vertex to have
- */
-void newVertex(Vertex* vin, int id, int n){
-  vin->id = id;
-  vin->neighbors = (int*)malloc(n*sizeof(int));
-  vin->maxNeighbors = n;
-  vin->currentNeighbors = 0;
-  int i = 0;
-  for(i = 0; i < NUMBER_OF_COLORS; i++){
-    vin->edgeColorList[i] = 0;
-  }
-}
-
-/*  Like newVertex but for an edge
- *  Expects pointers to the new endpoints and the edge's color
- *  Also updates neighbor and color information for those vertices
- */
-void newEdge(Edge * e, Vertex * v1, Vertex * v2, Color col){
-  e->v1 = v1;
-  e->v2 = v2;
-  e->col = col;
-  v1->neighbors = (int*)realloc(v1->neighbors, (v1->currentNeighbors + 1)*sizeof(int));
-  *(v1->neighbors + v1->currentNeighbors) = v2->id;
-  v1->currentNeighbors++;
-  v1->edgeColorList[col]++;
-  v2->neighbors = (int*)realloc(v2->neighbors, (v2->currentNeighbors + 1)*sizeof(int));
-  *(v2->neighbors + v2->currentNeighbors) = v1->id;
-  v2->currentNeighbors++;
-  v2->edgeColorList[col]++;
-}
-
-/*  Runs through the first vertex's neighbor list and looks for the second's id
- *  If it is found it returns true, otherwise false
- */
-bool areNeighbors(Vertex * v1, Vertex * v2){
-  int i = 0;
-  for(i = 0; i < v1->currentNeighbors; i++){
-    //printf("%d %d\n", *(v1->neighbors + i),v2->id);
-    if(*(v1->neighbors + i) == v2->id){
-      return TRUE;
-    }
-  }
-  return FALSE;
-}
-
-/*  Stores in outGraph all the vertices of inGraph
- * plus all the edges of outGraph that are color col
- */
-void getSubGraph(Graph * inGraph, Graph * outGraph, Color col){
-  int i;
-  int n = inGraph->numVertices;
-  outGraph->vertices = (Vertex *) malloc(n*sizeof(Vertex));
-  outGraph->numVertices = n;
-  outGraph->edges = (Edge *) malloc((n*n-1)/2 * sizeof(Edge));
-  outGraph->isNull = FALSE;
-  for(i = 0; i < n; i++){
-    newVertex(outGraph->vertices + i, i, n);
-  }
-  char buf[20];
-  int k = 0;
-  for(i = 0; i < inGraph->numEdges; i++){
-    Edge * e = inGraph->edges + i;
-    edgeToString(buf, e);
-    //printf("Checking edge %s\n", buf);
-    if(e->col == col){
-      Vertex * v1 = (outGraph->vertices) + e->v1->id;
-      Vertex * v2 = (outGraph->vertices) + e->v2->id;
-      newEdge(outGraph->edges + k, (outGraph->vertices) + e->v1->id, (outGraph->vertices) + e->v2->id, col);
-      k++;
-    }
-
-  }
-  outGraph->numEdges = k;
-}
-
-/*  Runs through a graph and checks all combinations of 3 vertices
- * to see if any form a triangle. Probably more efficient ways to do it
- * involving connected components or something
- */
-bool hasK3(Graph * g){
-  int n = g->numVertices;
-  int i, j, k;
-
-  for(i = 0; i < n - 2; i++){
-    Vertex* v1 = g->vertices + i;
-    for(j = i + 1; j < n - 1; j++){
-      Vertex * v2 = g->vertices + j;
-      for(k = j + 1; k < n; k++){
-        Vertex * v3 = g->vertices + k;
-        if(areNeighbors(v1, v2) && areNeighbors(v2, v3) && areNeighbors(v1, v3)){
-          return TRUE;
-        }
-      }
-    }
-  }
-  return FALSE;
-}
-
-/*  Just returns a random color, useful mostly for testing
- */
-Color getRandomColor(){
-  return rand()%NUMBER_OF_COLORS;
-}
-
-/*  Populates old with copies of all the vertices in new,
- *  and with copies of all edges, all in new memory
- *  This allows us to modify the copy without changing the original.
- *  Consider rewriting to return a pointer to the new graph with malloc
- */
-void copyGraph(Graph * old, Graph * new){
-  new->vertices = (Vertex *)malloc(old->numVertices*sizeof(Vertex));
-  new->numVertices = old->numVertices;
-  new->edges = (Edge *)malloc(old->numEdges*sizeof(Edge));
-  new->numEdges = old->numEdges;
-  new->isNull = FALSE;
+/*
+  Creates and returns a list of 2^n graphs, where n is the number of
+  vertices in g. Each graph has a different combination of edge colors,
+  which is why there are so many of them.
+*/
+GraphList * getNextSize(Graph * g){
   int i, j;
-  for(i = 0; i < old->numVertices; i++){
-    newVertex(new->vertices + i, i, old->numVertices);
-  }
-  for(i = 0; i < old->numEdges; i++){
-    Edge * e = old->edges + i;
-    newEdge(new->edges + i, new->vertices + e->v1->id, new->vertices + e->v2->id, e->col);
-  }
-}
-
-//Simple wrapper for newEdge to color the edge a random color
-void newEdgeRandCol(Edge* e, Vertex * v1, Vertex * v2){
-  newEdge(e, v1, v2, getRandomColor());
-}
-
-/*  Populates g with Kn, the complete graph with n vertices
- *
- *  Consider rewriting to return a pointer to Kn without having to pass in
- *  the pointer, using malloc
- */
-void createKn(Graph* g, int n){
-  g->vertices = (Vertex *) malloc(n*sizeof(Vertex));
-  g->numVertices = n;
-  g->edges = (Edge *) malloc((n*n-1)/2 * sizeof(Edge));
-  g->numEdges = n*(n-1)/2;
-  g->isNull = FALSE;
-  int i;
-  int j;
-  for(i = 0; i < g->numVertices; i++){
-    newVertex(g->vertices + i, i, n);
-  }
-  int k = 0;
-  for(i = 0; i < g->numVertices-1; i++){
-    for(j = i + 1; j < g->numVertices; j++){
-      newEdge(g->edges + k, g->vertices + i, g->vertices + j, 0);
-      k++;
-    }
-  }
-}
-
-/*  Prints a human readable representation of g
- *  It prints it's characteristic matrix, where X
- *  represents no edge between the vertices, and a
- *  letter represents its corresponding color.
- */
-void printGraph(Graph * g){
-  int n = g->numVertices;
-  int edgeMatrix[n][n];
-  int i, j;
-  for(i = 0; i < n; i++){
-    for(j = 0; j < n; j++){
-      edgeMatrix[i][j] = NUMBER_OF_COLORS;
-    }
-  }
-  for(i = 0; i < g->numEdges; i++){
-    Edge * e = g->edges + i;
-    edgeMatrix[e->v1->id][e->v2->id] = e->col;
-    edgeMatrix[e->v2->id][e->v1->id] = e->col;
-  }
-  printf("   ");
-  for(i = 0; i < n; i++){
-    printf("%d  ", i);
-  }
-  printf("\n");
-  for(i = 0; i < n; i++){
-    printf(" %d ", i);
-    for(j = 0; j < n; j++){
-      printf("%c  ", colorChars[edgeMatrix[i][j]]);
-    }
-    printf("\n");
-  }
-}
-
-/*  Gives g a new vertex, and does the work of expanding appropriate memory slots
- *  I'm sure there's room for improvement here, like maybe returning a pointer
- *  to the new vertex
- */
-void addVertex(Graph * g){
-  g -> vertices = (Vertex *)realloc(g->vertices, (g->numVertices+1)*sizeof(Vertex));
-  g->numVertices++;
-  newVertex(g->vertices + g->numVertices-1, g->numVertices-1, g->numVertices);
-}
-
-//used in implementation of qsort
-int compareInts(const void * a, const void * b){
-  return (*(int*)a - *(int*)b);
-}
-
-/*  Returns an array of ints, where each in represents the number of red
- *  edges incident to a vertex. The array is also sorted for easier comparison.
- *
- *  Returns pointer to array, so we need to remember to free the space when we're done
- */
-int* getCharList(Graph * g){
-  int i, j;
-  int* colorList = (int*)malloc(g->numVertices*sizeof(int));
-  for(i = 0; i < g->numVertices; i++){
-    colorList[i] = 0;
-  }
-  for(i = 0; i < g->numVertices; i++){
-      colorList[i] += (g->vertices + i)->edgeColorList[0];
-  }
-  qsort(colorList, g->numVertices, sizeof(int), compareInts);
-  return colorList;
-}
-
-
-/*  returns TRUE if the characteristic list of the g and h are the same
- */
-bool areColorIso(Graph * g, Graph * h){
-  if(g != NULL && h!= NULL){
-    int * a = getCharList(g);
-    int * b = getCharList(h);
-    bool ans = !memcmp(a, b, g->numVertices);
-    free(a);
-    free(b);
-    return ans;
-  }else{
-    return FALSE;
-  }
-}
-
-
-/*  Now we get to the good stuff! This function populates outlist
- *  with all the graphs you can generate by adding a vertex to g
- *  and then coloring every new edge every possible combination of color.
- *  There are 2^n such combinations, 2 because there are 2 colors, n because
- *  there are n edges.
- */
-void getNextSize(Graph * g, GraphPtrList * outList){
-  int n = g -> numVertices;
-  int i, k;
-
-  //2^n combinations of new edges to add
-  //So the way I implemented this is specific to 2 colors
-  //i in binary counts from 00000...000 to 1111111...111 where there are n bits
-  //so each edges color is that bit
+  int n = g->n;
+  GraphList * out = newGraphList(pow(2, n));
   for(i = 0; i < pow(2, n); i++){
-    Graph * current = *(outList->graphs + i);
-
-    copyGraph(g, current);
-    addVertex(current);
-    Vertex * newVertex = current->vertices + n;
-    current->edges = (Edge*)realloc(current->edges, (current->numEdges + n)*sizeof(Edge));
-
-    int j = i;
-    for(k = 0; k < n; k++){
-      Vertex * v = current->vertices + k;
-      Edge * newEdgePtr = current->edges + current->numEdges + k;
-      newEdge(newEdgePtr, newVertex, v, j&1);
-      //divides j by 2, essentially moving j over 1 bit
-      j = j>>1;
+    Graph * current = copyGraph(g);
+    //edges has to be expanded a little. n(n-1)/2 + n = n(n+1)/2
+    current->edges = realloc(current->edges, (n*(n+1)/2) * sizeof *(current->edges));
+    current->n += 1;
+    int k = i;
+    //I use i as a combination of 2 colors.
+    //ie 101 would mean the first edge is green, then red, then green again
+    //this means i can use bitshifting and anding to decode it quickly
+    for(j = n*(n-1)/2; j < n*(n+1)/2; j++){
+      *(current->edges + j) = (k&1) + 1;
+      k = k>>1;
     }
-    //maybe write addEdge function? To combine several lines
-    current->numEdges += n;
-  }
-}
-
-
-/*  Does all the necessary mallocing for a list of graph pointers
- *  Remember to free any pointer this creates
- */
-GraphPtrList* newGraphPtrList(int n){
-  GraphPtrList* gL = (GraphPtrList *)malloc(sizeof(GraphPtrList));
-  gL->size = n;
-  gL->graphs = (Graph **)malloc(n*sizeof(Graph*));
-  int i;
-  for(i = 0; i < n; i++){
-    *(gL->graphs + i) = (Graph *)malloc(sizeof(Graph));
-  }
-  return gL;
-}
-
-//deallocates all memory allocated to a graph
-void destroyGraph(Graph * g){
-  int i;
-  for(i = 0; i < g->numVertices; i++){
-    free((g->vertices + i)->neighbors);
-  }
-  free(g->edges);
-  free(g->vertices);
-  free(g);
-}
-
-/*  The other fun part of this program, this function takes a list of graph pointers
- *  and returns a new list that contains only one graph from each isomorphism
- *  equivalence class
- *  Remember to free any pointer made from this
- */
-GraphPtrList * clean(GraphPtrList * in){
-  int i = 0;
-  int j = 0;
-  int k = 0;
-  int length = in->size;
-  int found = 0;
-  //for every graph g in 'in'
-  while(i < length){
-    //if that graph is not NULL
-    if(!((*(in->graphs + i))->isNull)){
-      //then for every other graph after it h
-      for(j = length-1; j > i; j--){
-        //if g and h are color isomorphic
-        if(areColorIso(*(in->graphs + i), *(in->graphs + j))){
-          //set h to null
-          (*(in->graphs + j))->isNull = TRUE;
-        }
-      }
-      found++;
-    }
-    //check the next one
-    i++;
-  }
-  //what we're gonna return
-
-
-  GraphPtrList * out = newGraphPtrList(found);
-  printf("%d\n", out->size);
-  //for every graph g in 'in'
-  for(i = 0; i < length; i++){
-    //if g is not null
-    if(!(*(in->graphs + i))->isNull){
-      //then set the kth graph of out to be g
-      //no need to copy, we're doing this in place
-      *(out->graphs+k) = *(in->graphs+i);
-      printf("copy loop %d\n", i );
-      k++;
-    //but if it is null
-    }else{
-      //free its memory
-      destroyGraph(*(in->graphs + i));
-    }
+    *(*(out->graphs) + i) = current;
   }
   return out;
 }
 
+/*
+  Checks whether a graph has a K3 subgraph that is all color c
+  Yes three nested for loops screams inefficient but hey at least
+  it works. And it turns out it's not even our biggest bottleneck by a lot
+*/
+bool hasK3(Graph * g, Color c){
+  int n = g->n;
+  int * numEdges = getCharList(g, c);
+  //the checks in between help us avoid checking impossible combos
+  for(int i = 0; i < n - 2; i++){
+    if( *(numEdges+i) >= 2) {
+      for(int j = i + 1; j < n - 1; j++){
+        if( *(numEdges+j) >= 2) {
+          for(int k = j + 1; k < n; k++){
+            if(
+              *(numEdges+k) >= 2  &&
+              getEdgeColor(g, i, j) == c &&
+              getEdgeColor(g, j, k) == c &&
+              getEdgeColor(g, i, k) == c
+            ){
+              free(numEdges);
+              return TRUE;
+            }
+          }
+        }
+      }
+    }
+  }
+  free(numEdges);
+  return FALSE;
+}
+
+/*
+  Pretty much the same as has K3. We could probably even write a recursive one
+  to check for hasKn, but that will have to be investigated later.
+*/
+bool hasK4(Graph * g, Color c){
+  int n = g->n;
+  int * numEdges = getCharList(g, c);
+
+  for(int h = 0; h < n - 3; h++) {
+    if( *(numEdges+h) >= 3) {
+      for(int i = h + 1; i < n - 2; i++){
+        if( *(numEdges+i) >= 3) {
+          for(int j = i + 1; j < n - 1; j++){
+            if( *(numEdges+j) >= 3) {
+              for(int k = j + 1; k < n; k++){
+                if(
+                  *(numEdges+k) >= 3  &&
+                  getEdgeColor(g, h, i) == c &&
+                  getEdgeColor(g, h, j) == c &&
+                  getEdgeColor(g, h, k) == c &&
+                  getEdgeColor(g, i, j) == c &&
+                  getEdgeColor(g, i, k) == c &&
+                  getEdgeColor(g, j, k) == c
+                ){
+                  free(numEdges);
+                  return TRUE;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  free(numEdges);
+  return FALSE;
+}
+
+/*
+  Simple iterative factorial function
+*/
+int fact(int n){
+  int t = 1;
+  for(int  i = 2; i <= n; i++){
+    t *= i;
+  }
+  return t;
+}
+
+/*
+  Now this is cool. It turns out there is a natural way to iterate over permutations
+  by taking every number from 0 to n! in decimal and converting it to base !
+  Here is the link for example and explanation:
+  https://en.wikipedia.org/wiki/Factorial_number_system
+
+  I have this return a Cell when really it could be done in an array much faster.
+
+  n is the number to convert
+  dig is the number of digits the answer should have
+*/
+Cell * decToFact(int n, int dig){
+  int temp[dig];
+  int num = n;
+  Cell * ans = malloc(sizeof *ans);
+  ans->size = 0;
+  ans->next = NULL;
+  ans->value = -1;
+  for(int i = 0; i < dig; i++){
+    temp[i] = num % (i+1);
+    num /= (i+1);
+  }
+  for(int i = dig-1; i >= 0; i--){
+    addToList(ans, temp[i]);
+  }
+
+  Cell * real = ans->next;
+  free(ans);
+  return real;
+}
+
+
+/*
+  Takes an array of lists and collapses it into a single list with n elements
+  in the order they appear in the array.
+  []
+  [2 0]
+  [3]
+  [1]
+  collapses to [2 0 3 1]
+*/
+int * collapseVerts(Cell ** verts, int n){
+  int * t = malloc(n * sizeof(int));
+  int found = 0;
+  for(int i = 0; i < n; i++){
+    Cell * current = verts[i];
+    if(current->size > 0){
+      while(current->next != NULL){
+        t[found] = current->value;
+        found++;
+        current = current->next;
+      }
+      t[found] = current->value;
+      found++;
+    }
+  }
+  return t;
+}
+
+/*
+  Now we get to the meat and potatoes of the algorithm. This function recursively
+  checks whether 2 graphs are color isomorphic by checking every valid permutation
+  of g's vertices.
+  Base Case:
+    We have permuted all vertices. We collapse down those vertices into an array
+    for faster access. Then we check that every edge between the two arrays
+    matches. If they do, we return true and escape all the way to the first
+    call of recIsoCheck. Otherwise we return false and continue to check other permutations.
+  Recursive Step:
+    Iterate through all permutations of the vertices of g that have depth red edges
+    each time call recIsoCheck one layer deeper.
+    If it returns true, clean up and return true.
+    If false, check next permutation.
+*/
+bool recIsoCheck(Cell *vertsG[], Cell *vertsH[], int depth, Graph * g, Graph * h){
+  if(depth >= g->n-1){
+    int * gList = collapseVerts(vertsG, g->n);
+    int * hList = collapseVerts(vertsH, h->n);
+
+    for(int i = 0; i < g->n-1; i++){
+      for(int j = i + 1; j < g->n; j++){
+        if(getEdgeColor(g, gList[i], gList[j]) != getEdgeColor(h, hList[i], hList[j])){
+          free(gList);
+          free(hList);
+          return FALSE;
+        }
+      }
+    }
+    free(gList);
+    free(hList);
+
+    return TRUE;
+  }else{
+    if(vertsG[depth]->size > 0){
+      for(int i = 0; i < fact(vertsG[depth]->size); i++){
+        Cell * perm = decToFact(i, vertsG[depth]->size);
+        Cell * permVertsG = permuteList(vertsG[depth], perm);
+        freeList(perm);
+        Cell **copy = copyListArray(vertsG, g->n);
+        freeList(copy[depth]);
+        copy[depth] = permVertsG;
+        bool ans = recIsoCheck(copy, vertsH, depth + 1, g, h);
+        freeListArray(copy, g->n);
+        if(ans) return TRUE;
+      }
+      return FALSE;
+    }else{
+      return recIsoCheck(vertsG, vertsH, depth + 1, g, h);
+    }
+  }
+}
+
+/*
+  Simple function used by qsort
+*/
+int cmpfunc (const void * a, const void * b)
+{
+   return ( *(int*)a - *(int*)b );
+}
+
+/*
+  Returns true if the two graphs are color isomorphic and false otherwise.
+  This function sets up the infrastructure to call recIsoCheck.
+  It checks first that the two graphs have compatible characteristic lists
+  as described in our presentation.
+  Then it splits the vertices into groups with the same number of red edges.
+  Then it calls recIsoCheck
+
+  Can be optimized quite a bit
+*/
+bool isColorIso(Graph * g, Graph * h){
+  int * charListG = getCharList(g, RED);
+  int * charListGSorted = getCharList(g, RED);
+  int * charListH = getCharList(h, RED);
+  int * charListHSorted = getCharList(h, RED);
+
+  int n = g->n;
+  qsort(charListGSorted,n,sizeof(int),cmpfunc);
+  qsort(charListHSorted,n,sizeof(int),cmpfunc);
+  Cell * vertsG[n];
+  Cell * vertsH[n];
+  int result = memcmp(charListGSorted, charListHSorted, n*sizeof(int));
+  free(charListGSorted);
+  free(charListHSorted);
+
+  if(result == 0){
+      for(int i = 0; i < n; i++){
+        vertsG[i] = calloc(1, sizeof *vertsG[i]);
+        vertsH[i] = calloc(1, sizeof *vertsH[i]);
+      }
+      for(int i = 0 ; i < n; i++){
+         addToList(vertsG[charListG[i]], i);
+         addToList(vertsH[charListH[i]], i);
+       }
+       //because the first cell is a dummy cell
+       for(int i = 0; i < n; i++){
+         if (vertsG[i]->next != NULL) {
+           Cell * toFree = vertsG[i];
+           vertsG[i] = vertsG[i]->next;
+           free(toFree);
+         }
+         if (vertsH[i]->next != NULL) {
+           Cell * toFree = vertsH[i];
+           vertsH[i] = vertsH[i]->next;
+           free(toFree);
+         }
+      }
+
+      bool ans = recIsoCheck(vertsG, vertsH, 0, g, h);
+
+      for(int i = 0; i < n; i++){
+         freeList(vertsG[i]);
+         freeList(vertsH[i]);
+       }
+
+       free(charListH);
+       free(charListG);
+       return ans;
+  }else{
+    free(charListH);
+    free(charListG);
+    return FALSE;
+  }
+}
+
+/*
+  Accepts a graphList and modifies it so that it contains only one
+  representative of each color isomorphism class remains. In other words, no
+  duplicates. It also filters out any invalid graphs, which are
+  graphs that have either a red K3 or a green K4.
+*/
+void clean(GraphList * gL){
+    int numGraphs = gL->size;
+    int i = 0;
+    int foundGraphs = 0;
+
+    GraphList * cleanedGraphs = newGraphList(numGraphs);
+    //has to check every graph with every other graph
+    //but the first one invalidates a lot of others, so not quite n^2
+    while(i < numGraphs){
+      Graph * current = getGraph(gL, i);
+      if(!current->isNull){
+        for(int j = numGraphs - 1; j > i; j--){
+          Graph * other = getGraph(gL, j);
+          if(!other->isNull){
+           if(isColorIso(current, other)){
+              other->isNull = TRUE;
+            }
+          }
+        }
+      }
+      //just displays an updating percent because this tends to take the longest
+      //time and it's nice to see how it's coming along
+      if(gL->size > 1000 && i%100 == 0){
+        printf("%3d%% done...", (int)(i*100/gL->size));
+        printf("\n\033[F\033[J");
+      }
+      i++;
+    }
+    i=0;
+
+    //Now we have to check there are no red K3s and no green K4s
+    //Honestly its probably more efficient to check this first,
+    //should be tested
+    while(i < numGraphs){
+      Graph * current = getGraph(gL, i);
+      if(!current->isNull){
+        bool K3 = hasK4(current, RED);
+        bool K4 = hasK4(current, GREEN);
+        if(K3 | K4){
+          current->isNull = TRUE;
+        }else{
+          *(*cleanedGraphs->graphs + foundGraphs) = *(*gL->graphs + i);
+          foundGraphs++;
+        }
+      }
+      i++;
+    }
+    for(i = 0; i < foundGraphs; i++){
+      *(*gL->graphs + i) = *(*cleanedGraphs->graphs + i);
+    }
+    shrinkGraphList(gL, foundGraphs);
+    destroyGraphList(cleanedGraphs);
+ }
+
+/*
+  Implements the bulk of the algorithm as described in the project proposal.
+  Returns the smallest int n such that there are no valid colorings of Kn.
+*/
+int run(){
+  int tiers = 10;
+  //creates an array of graphlists
+  GraphList ** graphTiers = mallocDB(tiers * sizeof(*graphTiers), "run, **graphTiers");
+
+  printf("Generating First GraphList\n");
+  *graphTiers = newGraphList(1);
+  printf("Generating K1\n");
+  **((*graphTiers)->graphs) = createKn(1);
+
+  printf("starting mem usage:\n");
+  dumpMallinfo;
+  for(int i = 1; i < tiers; i++){
+    printf("Starting row %d\n", i + 1);
+    *(graphTiers + i) = newGraphList(0);
+    printf("Before generating next size: ");
+    dumpMallinfo();
+    int num = (*(graphTiers + i - 1))->size;
+    for(int j = 0; j < num; j++){
+      printf("Generating the next size: %3d%% done...", (int)(j*100/num));
+      printf("\n\033[F\033[J");
+      GraphList * gL = getNextSize(getGraph(*(graphTiers + i - 1), j));
+      //it helps to clean before merging to keep the sizes low for
+      //final row cleaning
+      clean(gL);
+      mergeGraphLists(*(graphTiers + i), gL);
+    }
+    printf("After generating next size: ");
+    dumpMallinfo();
+
+    printf("%d has %d graphs raw\n", i+1, (*(graphTiers + i))->size);
+    printf("Cleaning this set up...\n");
+
+    clean(*(graphTiers + i));
+
+    printf("%d has %d graphs cleaned\n",i+1, (*(graphTiers + i))->size);
+
+    printf("-------------------\n%d : %d\n", i + 1, (*(graphTiers + i))->size);
+  }
+}
+
+
+
 int main(){
-  time_t t;
-  time(&t);
-  srand(t);
 
-  Graph g;
-  createKn(&g, 8);
-  printGraph(&g);
-  int i, j;
-  int numNextSizeUp = (int) pow(NUMBER_OF_COLORS, g.numVertices) + .5;
-  printf("%d\n", numNextSizeUp);
-  GraphPtrList * nextSizeUp = newGraphPtrList(numNextSizeUp);
-
-  getNextSize(&g, nextSizeUp);
-  GraphPtrList* cleaned;
-  printf("%d\n", nextSizeUp->size);
-  cleaned = clean(nextSizeUp);
-  printf("Cleaned size: %d\n", cleaned->size);
+  run();
 
   return 0;
 }
